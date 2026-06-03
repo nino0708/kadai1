@@ -5,15 +5,19 @@
   },
   {
     "ParameterKey": "EC2KeyPairName",
-    "ParameterValue": "20260602"
+    "ParameterValue": "impress-keypair"
   },
   {
-    "ParameterKey": "NotificationEmail",
-    "ParameterValue": "kazuhiro19851013@hotmail.com"
+    "ParameterKey": "DBPassword",
+    "ParameterValue": "YourPassword123!"
   },
   {
     "ParameterKey": "EC2InstanceType",
     "ParameterValue": "t3.micro"
+  },
+  {
+    "ParameterKey": "DBInstanceClass",
+    "ParameterValue": "db.t3.micro"
   },
   {
     "ParameterKey": "ASGMinSize",

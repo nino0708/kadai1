@@ -47,9 +47,34 @@ Parameters:
     Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
     Description: Amazon Linux 2023 (x86_64)
 
-  NotificationEmail:
+  DBInstanceClass:
     Type: String
-    Description: CloudWatchアラーム通知先メールアドレス
+    Default: db.t3.micro
+    AllowedValues: [db.t3.micro, db.t3.small, db.t3.medium]
+
+  DBName:
+    Type: String
+    Default: trainingdb
+
+  DBUsername:
+    Type: String
+    Default: admin
+
+  DBPassword:
+    Type: String
+    NoEcho: true
+    MinLength: 8
+    Description: RDSマスターパスワード（8文字以上）
+
+  AdminEmail1SSMPath:
+    Type: String
+    Default: /training/admin/email1
+    Description: 管理者メール1のSSMパラメータパス
+
+  AdminEmail2SSMPath:
+    Type: String
+    Default: /training/admin/email2
+    Description: 管理者メール2のSSMパラメータパス
 
   ASGMinSize:
     Type: Number
@@ -263,6 +288,20 @@ Resources:
         - Key: Name
           Value: !Sub ${ProjectName}-ec2-sg
 
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: RDS - Allow MySQL from EC2 only
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId: !Ref EC2SecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-rds-sg
+
   # ----------------------------------------------------------
   # ALB (Application Load Balancer)
   # ----------------------------------------------------------
@@ -388,6 +427,50 @@ Resources:
         TargetValue: !Ref CPUScaleOutThreshold
 
   # ----------------------------------------------------------
+  # RDS Subnet Group
+  # ----------------------------------------------------------
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: RDS Multi-AZ subnet group
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-db-subnet-group
+
+  # ----------------------------------------------------------
+  # RDS Multi-AZ (MySQL)
+  # ----------------------------------------------------------
+  RDSInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Delete
+    Properties:
+      DBInstanceIdentifier: !Sub ${ProjectName}-rds
+      DBInstanceClass: !Ref DBInstanceClass
+      Engine: mysql
+      EngineVersion: '8.0'
+      MasterUsername: !Ref DBUsername
+      MasterUserPassword: !Ref DBPassword
+      DBName: !Ref DBName
+      MultiAZ: true
+      StorageType: gp3
+      AllocatedStorage: '20'
+      StorageEncrypted: true
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VPCSecurityGroups:
+        - !Ref RDSSecurityGroup
+      BackupRetentionPeriod: 0
+      DeletionProtection: false
+      EnableCloudwatchLogsExports:
+        - error
+        - slowquery
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-rds
+
+  # ----------------------------------------------------------
   # SNS Topic (アラーム通知)
   # ----------------------------------------------------------
   AlarmSNSTopic:
@@ -396,7 +479,9 @@ Resources:
       TopicName: !Sub ${ProjectName}-alarms
       Subscription:
         - Protocol: email
-          Endpoint: !Ref NotificationEmail
+          Endpoint: '{{resolve:ssm:/training/admin/email1}}'
+        - Protocol: email
+          Endpoint: '{{resolve:ssm:/training/admin/email2}}'
 
   # ----------------------------------------------------------
   # CloudWatch Alarms
@@ -443,6 +528,43 @@ Resources:
       OKActions:
         - !Ref AlarmSNSTopic
 
+  RDSCPUAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${ProjectName}-rds-cpu-high
+      AlarmDescription: RDS CPU使用率が80%超過
+      MetricName: CPUUtilization
+      Namespace: AWS/RDS
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref RDSInstance
+      AlarmActions:
+        - !Ref AlarmSNSTopic
+      OKActions:
+        - !Ref AlarmSNSTopic
+
+  RDSFreeStorageAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${ProjectName}-rds-storage-low
+      AlarmDescription: RDS空き容量が2GB未満
+      MetricName: FreeStorageSpace
+      Namespace: AWS/RDS
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 2000000000
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref RDSInstance
+      AlarmActions:
+        - !Ref AlarmSNSTopic
 
   # ----------------------------------------------------------
   # S3バケット削除用 Lambda（スタック削除時にオブジェクトを空にする）
@@ -526,7 +648,7 @@ Resources:
         Rules:
           - Id: DeleteOldLogs
             Status: Enabled
-            ExpirationInDays: 90
+            ExpirationInDays: 7
 
   CloudTrailBucketPolicy:
     Type: AWS::S3::BucketPolicy
@@ -621,19 +743,60 @@ Resources:
         - arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForBackup
         - arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForRestores
 
-  BackupPlan:
-    Type: AWS::Backup::BackupPlan
+  # ----------------------------------------------------------
+  # EventBridge Rule（CloudFormationスタック操作の監視）
+  # ----------------------------------------------------------
+  CloudFormationEventRule:
+    Type: AWS::Events::Rule
     Properties:
-      BackupPlan:
-        BackupPlanName: !Sub ${ProjectName}-backup-plan
-        BackupPlanRule:
-          - RuleName: DailyBackup
-            TargetBackupVault: !Ref BackupVault
-            ScheduleExpression: cron(0 18 * * ? *)  # 毎日JST 03:00
-            StartWindowMinutes: 60
-            CompletionWindowMinutes: 180
-            Lifecycle:
-              DeleteAfterDays: 30
+      Name: !Sub ${ProjectName}-cfn-stack-changes
+      Description: CloudFormationスタックの作成・削除を検知してSNS通知
+      State: ENABLED
+      EventPattern:
+        source:
+          - aws.cloudformation
+        detail-type:
+          - CloudFormation Stack Status Change
+        detail:
+          status-details:
+            status:
+              - CREATE_COMPLETE
+              - CREATE_FAILED
+              - DELETE_COMPLETE
+              - DELETE_FAILED
+              - ROLLBACK_COMPLETE
+      Targets:
+        - Id: AlarmSNSTarget
+          Arn: !Ref AlarmSNSTopic
+          InputTransformer:
+            InputPathsMap:
+              stackName: '$.detail.stack-id'
+              status: '$.detail.status-details.status'
+              time: '$.time'
+              account: '$.account'
+            InputTemplate: |
+              "CloudFormationスタック変更通知"
+              "アカウント: <account>"
+              "時刻: <time>"
+              "スタック: <stackName>"
+              "ステータス: <status>"
+
+  # EventBridgeからSNSへのパブリッシュ許可
+  SNSTopicPolicyForEventBridge:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - !Ref AlarmSNSTopic
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowEventBridgePublish
+            Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sns:Publish
+            Resource: !Ref AlarmSNSTopic
+
 
 # ============================================================
 # Outputs
@@ -648,6 +811,10 @@ Outputs:
   ALBDNSName:
     Description: ALB DNS名（アクセスURL）
     Value: !GetAtt ALB.DNSName
+
+  RDSEndpoint:
+    Description: RDSエンドポイント
+    Value: !GetAtt RDSInstance.Endpoint.Address
 
   AppS3BucketName:
     Description: アプリ用S3バケット名
