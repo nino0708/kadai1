@@ -17,7 +17,7 @@
   },
   {
     "ParameterKey": "ASGMaxSize",
-    "ParameterValue": "4"
+    "ParameterValue": "2"
   },
   {
     "ParameterKey": "ASGDesiredSize",
