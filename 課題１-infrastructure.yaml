@@ -38,10 +38,6 @@ Parameters:
     Default: t3.micro
     AllowedValues: [t3.micro, t3.small, t3.medium]
 
-  EC2KeyPairName:
-    Type: AWS::EC2::KeyPair::KeyName
-    Description: EC2接続用キーペア名
-
   AMIID:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
     Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
@@ -343,7 +339,6 @@ Resources:
       LaunchTemplateData:
         ImageId: !Ref AMIID
         InstanceType: !Ref EC2InstanceType
-        KeyName: !Ref EC2KeyPairName
         IamInstanceProfile:
           Arn: !GetAtt EC2InstanceProfile.Arn
         SecurityGroupIds:
