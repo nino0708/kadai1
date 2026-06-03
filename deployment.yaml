@@ -1,4 +1,4 @@
-template-file-path: 課題１-infrastructure.yaml
+template-file-path: 課題1-infrastructure.yaml
 parameters:
   ProjectName: aws-training
   EC2InstanceType: t3.micro
