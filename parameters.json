@@ -8,16 +8,8 @@
     "ParameterValue": "impress-keypair"
   },
   {
-    "ParameterKey": "DBPassword",
-    "ParameterValue": "YourPassword123!"
-  },
-  {
     "ParameterKey": "EC2InstanceType",
     "ParameterValue": "t3.micro"
-  },
-  {
-    "ParameterKey": "DBInstanceClass",
-    "ParameterValue": "db.t3.micro"
   },
   {
     "ParameterKey": "ASGMinSize",
