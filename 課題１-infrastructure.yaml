@@ -628,59 +628,10 @@ Resources:
         - arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForBackup
         - arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForRestores
 
-  # ----------------------------------------------------------
-  # EventBridge Rule（CloudFormationスタック操作の監視）
-  # ----------------------------------------------------------
-  CloudFormationEventRule:
-    Type: AWS::Events::Rule
-    Properties:
-      Name: !Sub ${ProjectName}-cfn-stack-changes
-      Description: CloudFormationスタックの作成・削除を検知してSNS通知
-      State: ENABLED
-      EventPattern:
-        source:
-          - aws.cloudformation
-        detail-type:
-          - CloudFormation Stack Status Change
-        detail:
-          status-details:
-            status:
-              - CREATE_COMPLETE
-              - CREATE_FAILED
-              - DELETE_COMPLETE
-              - DELETE_FAILED
-              - ROLLBACK_COMPLETE
-      Targets:
-        - Id: AlarmSNSTarget
-          Arn: !Ref AlarmSNSTopic
-          InputTransformer:
-            InputPathsMap:
-              stackName: '$.detail.stack-id'
-              status: '$.detail.status-details.status'
-              time: '$.time'
-              account: '$.account'
-            InputTemplate: |
-              "CloudFormationスタック変更通知"
-              "アカウント: <account>"
-              "時刻: <time>"
-              "スタック: <stackName>"
-              "ステータス: <status>"
+ 
 
-  # EventBridgeからSNSへのパブリッシュ許可
-  SNSTopicPolicyForEventBridge:
-    Type: AWS::SNS::TopicPolicy
-    Properties:
-      Topics:
-        - !Ref AlarmSNSTopic
-      PolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Sid: AllowEventBridgePublish
-            Effect: Allow
-            Principal:
-              Service: events.amazonaws.com
-            Action: sns:Publish
-            Resource: !Ref AlarmSNSTopic
+
+
 
 
 # ============================================================
