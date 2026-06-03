@@ -1,27 +1,3 @@
-
-[
-  {
-    "ParameterKey": "ProjectName",
-    "ParameterValue": "aws-training"
-  },
-  {
-    "ParameterKey": "EC2InstanceType",
-    "ParameterValue": "t3.micro"
-  },
-  {
-    "ParameterKey": "ASGMinSize",
-    "ParameterValue": "2"
-  },
-  {
-    "ParameterKey": "ASGMaxSize",
-    "ParameterValue": "2"
-  },
-  {
-    "ParameterKey": "ASGDesiredSize",
-    "ParameterValue": "2"
-  },
-  {
-    "ParameterKey": "CPUScaleOutThreshold",
-    "ParameterValue": "50"
-  }
-]
+template-file-path: 課題１-infrastructure.yaml
+parameters: {}
+tags: {}
